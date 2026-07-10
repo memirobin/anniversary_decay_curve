@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MU5735事件五年舆情周年衰减曲线 - 纯图表版</title>
+    <!-- 引入 Tailwind CSS 进行现代布局 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 ECharts 库用于高精度数据可视化 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <!-- 引入 Inter/Plus Jakarta Sans 类似的极简高可读性字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+            background: transparent !important;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+        }
+        /* 微调图表容器以确保在任何容器中都能完美缩放 */
+        .chart-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body class="h-full w-full">
+
+    <div class="chart-wrapper flex flex-col justify-between">
+        <!-- 悬浮交互切换控制按钮组：超轻量扁平化设计，避免破坏图表透明观感 -->
+        <div class="absolute top-4 right-6 z-10 flex gap-2">
+            <button id="btn-all" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800/80 text-slate-200 border border-slate-700/50 hover:bg-slate-700 transition duration-200 backdrop-blur-sm">
+                显示全部
+            </button>
+            <button id="btn-fit" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/30 hover:bg-rose-500/20 transition duration-200 backdrop-blur-sm">
+                仅拟合曲线
+            </button>
+        </div>
+
+        <!-- ECharts 主容器，使用完全透明背景 -->
+        <div id="chart-container" class="w-full h-full" style="background-color: transparent;"></div>
+    </div>
+
+    <script>
+        // 核心原始数据提取
+        const timeline = ['事发日\n(2022)', '一周年\n(2023)', '二周年\n(2024)', '三周年\n(2025)', '四周年\n(2026)'];
+        const dataDaily = [630, 376, 129, 65, 52];
+        const dataWeekly = [2531, 767, 411, 573, 275];
+        const dataRelated = [255, 105, 73, 59, 37];
+        const dataRatio = [10.1, 13.7, 17.8, 10.3, 13.5];
+        const decayRates = [null, '-40.3%', '-65.7%', '-49.6%', '-20.0%'];
+
+        // 最小二乘法进行指数拟合计算：y = a * e^(b * x)
+        // 令 z = ln(y), 建立线性回归方程：z = ln(a) + b * x
+        function computeExponentialFitPoints() {
+            const xVal = [0, 1, 2, 3, 4];
+            const yVal = dataDaily;
+            const n = xVal.length;
+
+            let sumX = 0, sumY = 0, sumXX = 0, sumZ = 0, sumXZ = 0;
+            for (let i = 0; i < n; i++) {
+                const x = xVal[i];
+                const y = yVal[i];
+                const z = Math.log(y);
+
+                sumX += x;
+                sumZ += z;
+                sumXX += x * x;
+                sumXZ += x * z;
+            }
+
+            const b = (n * sumXZ - sumX * sumZ) / (n * sumXX - sumX * sumX);
+            const lnA = (sumZ - b * sumX) / n;
+            const a = Math.exp(lnA);
+
+            // 生成平滑的拟合点 (0.05 为步长以呈现完美圆滑弧线)
+            const fitPoints = [];
+            for (let x = 0; x <= 4; x += 0.05) {
+                const y = a * Math.exp(b * x);
+                fitPoints.push([x, parseFloat(y.toFixed(1))]);
+            }
+            return fitPoints;
+        }
+
+        const exponentialFitSeries = computeExponentialFitPoints();
+
+        // 初始化 ECharts 图表，确保底色透明
+        const chartDom = document.getElementById('chart-container');
+        const myChart = echarts.init(chartDom, null, { renderer: 'canvas', useDirtyRect: false });
+
+        const option = {
+            backgroundColor: 'transparent',
+            // 全局文本色彩：微风蓝灰 #94a3b8，兼顾深色与亮色背景下的基础可视度
+            textStyle: {
+                fontFamily: 'Plus Jakarta Sans, sans-serif',
+                color: '#94a3b8'
+            },
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: {
+                    type: 'shadow',
+                    shadowStyle: {
+                        color: 'rgba(148, 163, 184, 0.08)'
+                    }
+                },
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                borderColor: 'rgba(255, 255, 255, 0.08)',
+                borderWidth: 1,
+                padding: [12, 16],
+                textStyle: {
+                    color: '#cbd5e1'
+                },
+                formatter: function (params) {
+                    let tooltipHtml = `<div class="font-bold text-slate-100 mb-2 border-b border-slate-800 pb-1.5">${params[0].name.replace('\n', ' ')}</div>`;
+                    params.forEach(item => {
+                        let valueStr = item.value;
+                        if (item.seriesName === '指数衰减拟合趋势') return; // 忽略高精拟合插值点的具体数据展示
+                        if (item.seriesType === 'line' && item.seriesName.includes('占比')) {
+                            valueStr = `${item.value}%`;
+                        } else {
+                            valueStr = Number(item.value).toLocaleString();
+                        }
+                        tooltipHtml += `
+                            <div class="flex items-center justify-between gap-6 py-0.5 text-xs">
+                                <span class="flex items-center gap-1.5 text-slate-400">
+                                    <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background-color: ${item.color}"></span>
+                                    ${item.seriesName}
+                                </span>
+                                <span class="font-bold text-slate-200 font-mono">${valueStr}</span>
+                            </div>
+                        `;
+                    });
+                    
+                    // 获取当前周期的衰减率数据
+                    const index = params[0].dataIndex;
+                    if (decayRates[index]) {
+                        tooltipHtml += `
+                            <div class="mt-2 pt-1.5 border-t border-slate-800 flex items-center justify-between text-xs">
+                                <span class="text-rose-400 font-semibold">较上年正日衰减：</span>
+                                <span class="font-bold text-rose-400 font-mono">${decayRates[index]}</span>
+                            </div>
+                        `;
+                    }
+                    return tooltipHtml;
+                }
+            },
+            legend: {
+                top: '0%',
+                left: '2%',
+                icon: 'rect',
+                itemWidth: 12,
+                itemHeight: 6,
+                itemGap: 16,
+                textStyle: {
+                    color: '#cbd5e1',
+                    fontSize: 11
+                },
+                data: ['正日推文量', '周年周总量', 'MU5735相关量', '相关占比', '指数衰减拟合趋势']
+            },
+            grid: {
+                top: '12%',
+                left: '4%',
+                right: '4%',
+                bottom: '5%',
+                containLabel: true
+            },
+            xAxis: [
+                {
+                    type: 'category',
+                    data: timeline,
+                    axisTick: { alignWithLabel: true },
+                    axisLine: {
+                        lineStyle: {
+                            color: 'rgba(255, 255, 255, 0.12)'
+                        }
+                    },
+                    axisLabel: {
+                        color: '#94a3b8',
+                        fontSize: 11,
+                        lineHeight: 15
+                    }
+                },
+                // 辅助坐标轴，用于平滑指数曲线的定位
+                {
+                    type: 'value',
+                    min: 0,
+                    max: 4,
+                    show: false
+                }
+            ],
+            yAxis: [
+                {
+                    type: 'value',
+                    name: '推文数量 (条)',
+                    nameTextStyle: {
+                        color: '#94a3b8',
+                        fontSize: 10,
+                        padding: [0, 0, 8, 0]
+                    },
+                    splitLine: {
+                        lineStyle: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        }
+                    },
+                    axisLabel: {
+                        color: '#94a3b8',
+                        fontSize: 10,
+                        fontFamily: 'monospace'
+                    }
+                },
+                {
+                    type: 'value',
+                    name: '相关占比 (%)',
+                    nameTextStyle: {
+                        color: '#94a3b8',
+                        fontSize: 10,
+                        padding: [0, 0, 8, 0]
+                    },
+                    min: 0,
+                    max: 25,
+                    splitLine: { show: false },
+                    axisLabel: {
+                        color: '#94a3b8',
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        formatter: '{value}%'
+                    }
+                }
+            ],
+            series: [
+                {
+                    name: '正日推文量',
+                    type: 'bar',
+                    barWidth: '15%',
+                    itemStyle: {
+                        // 核心国航红：#de2910 搭载微渐变
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: '#f43f5e' },
+                            { offset: 1, color: '#de2910' }
+                        ]),
+                        borderRadius: [3, 3, 0, 0]
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        color: '#e2e8f0',
+                        fontSize: 9,
+                        fontFamily: 'monospace',
+                        offset: [0, -3],
+                        formatter: function(params) {
+                            // 在二、三、四周年柱子上方特别标注衰减率
+                            const idx = params.dataIndex;
+                            if (decayRates[idx]) {
+                                return `{val|${params.value}}\n{decay|${decayRates[idx]}}`;
+                            }
+                            return params.value;
+                        },
+                        rich: {
+                            val: {
+                                color: '#e2e8f0',
+                                fontFamily: 'monospace',
+                                fontSize: 9,
+                                align: 'center'
+                            },
+                            decay: {
+                                color: '#fda4af',
+                                fontSize: 9,
+                                fontFamily: 'sans-serif',
+                                align: 'center',
+                                padding: [2, 0, 0, 0]
+                            }
+                        }
+                    },
+                    data: dataDaily
+                },
+                {
+                    name: '周年周总量',
+                    type: 'bar',
+                    barWidth: '15%',
+                    itemStyle: {
+                        // 汉莎蓝：#1c3d5a 渐变混合
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: '#38bdf8' },
+                            { offset: 1, color: '#1c3d5a' }
+                        ]),
+                        borderRadius: [3, 3, 0, 0]
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        color: '#cbd5e1',
+                        fontSize: 9,
+                        fontFamily: 'monospace',
+                        offset: [0, -3]
+                    },
+                    data: dataWeekly
+                },
+                {
+                    name: 'MU5735相关量',
+                    type: 'bar',
+                    barWidth: '15%',
+                    itemStyle: {
+                        // 航空钛灰：#334155 渐变混合
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: '#64748b' },
+                            { offset: 1, color: '#334155' }
+                        ]),
+                        borderRadius: [3, 3, 0, 0]
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        color: '#cbd5e1',
+                        fontSize: 9,
+                        fontFamily: 'monospace',
+                        offset: [0, -3]
+                    },
+                    data: dataRelated
+                },
+                {
+                    name: '相关占比',
+                    type: 'line',
+                    yAxisIndex: 1,
+                    // 微风蓝灰 #7ba4c0 搭载微光阴影
+                    lineStyle: {
+                        color: '#7ba4c0',
+                        width: 3,
+                        shadowColor: 'rgba(123, 164, 192, 0.4)',
+                        shadowBlur: 10
+                    },
+                    itemStyle: {
+                        color: '#7ba4c0',
+                        borderColor: 'rgba(15, 23, 42, 0.8)',
+                        borderWidth: 2
+                    },
+                    symbolSize: 8,
+                    smooth: false,
+                    label: {
+                        show: true,
+                        position: 'top',
+                        color: '#7ba4c0',
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        formatter: '{c}%'
+                    },
+                    data: dataRatio
+                },
+                {
+                    name: '指数衰减拟合趋势',
+                    type: 'line',
+                    xAxisIndex: 1, // 结合辅助定位轴，绘制出极其光滑的平滑非网格曲线
+                    data: exponentialFitSeries,
+                    symbol: 'none',
+                    smooth: true,
+                    lineStyle: {
+                        color: '#f43f5e',
+                        type: 'dashed',
+                        width: 1.8,
+                        opacity: 0.95
+                    },
+                    tooltip: { show: false } // 纯研究性质辅线，不占用交互弹窗
+                }
+            ]
+        };
+
+        // 渲染图表
+        myChart.setOption(option);
+
+        // 窗口拉伸高弹性自适应，支持响应式布局
+        window.addEventListener('resize', () => {
+            myChart.resize();
+        });
+
+        // 按钮交互逻辑，方便在数据新闻演讲中一键聚焦重点
+        const btnAll = document.getElementById('btn-all');
+        const btnFit = document.getElementById('btn-fit');
+
+        btnAll.addEventListener('click', () => {
+            btnAll.classList.add('bg-slate-700/80');
+            btnFit.classList.remove('bg-rose-500/20');
+            myChart.dispatchAction({ type: 'legendAllSelect' });
+        });
+
+        btnFit.addEventListener('click', () => {
+            btnFit.classList.add('bg-rose-500/20');
+            btnAll.classList.remove('bg-slate-700/80');
+            
+            // 剔除其他数据项干扰，只凸显拟合曲线和正日推文
+            myChart.dispatchAction({ type: 'legendSelect', name: '正日推文量' });
+            myChart.dispatchAction({ type: 'legendSelect', name: '指数衰减拟合趋势' });
+            myChart.dispatchAction({ type: 'legendUnSelect', name: '周年周总量' });
+            myChart.dispatchAction({ type: 'legendUnSelect', name: 'MU5735相关量' });
+            myChart.dispatchAction({ type: 'legendUnSelect', name: '相关占比' });
+        });
+    </script>
+</body>
+</html>
